@@ -49,23 +49,54 @@ class GradientExplainer(BaseExplainer):
         target_pos_idx = self.helper._check_target(target)
         target_token_pos_idx = self.helper._check_target_token(text, target_token)
         text = self.helper._check_sample(text)
+        text = self.helper._prepare_sample(text)
 
-        item = self._tokenize(text)
-        item = {k: v.to(self.device) for k, v in item.items()}
-        input_len = item["attention_mask"].sum().item()
-        dl = (
-            InputXGradient(func, **self.init_args)
-            if self.multiply_by_inputs
-            else Saliency(func, **self.init_args)
-        )
+        if self.helper.HELPER_TYPE == "multiple-choice":
+            combined_scores = []
+            max_length = 0
 
-        inputs = self.get_input_embeds(text)
+            # 1) compute attribution scores and find the maximum length
+            for combined_text in text:
+                item = self._tokenize(combined_text)
+                item = {k: v.to(self.device) for k, v in item.items()}
+                input_len = item["attention_mask"].sum().item()
 
-        attr = dl.attribute(inputs, target=target_pos_idx, **kwargs)
-        attr = attr[0, :input_len, :].detach().cpu()
+                dl = (
+                    InputXGradient(func, **self.init_args)
+                    if self.multiply_by_inputs
+                    else Saliency(func, **self.init_args)
+                )
+                inputs = self.get_input_embeds(combined_text)
+                attr = dl.attribute(inputs, target=target_pos_idx, **kwargs)
+                attr = attr[0, :input_len, :].detach().cpu()
+                attr = attr.sum(-1).numpy()
 
-        # pool over hidden size
-        attr = attr.sum(-1).numpy()
+                combined_scores.append(attr)
+                max_length = max(max_length, len(attr))
+
+            # 2) pad each array to the max length
+            padded_scores = [np.pad(attr, (0, max_length - len(attr)), 'constant') for attr in combined_scores]
+
+            # Compute the mean across the padded scores
+            attr = np.mean(np.array(padded_scores), axis=0)
+
+        else:
+            item = self._tokenize(text)
+            item = {k: v.to(self.device) for k, v in item.items()}
+            input_len = item["attention_mask"].sum().item()
+            dl = (
+                InputXGradient(func, **self.init_args)
+                if self.multiply_by_inputs
+                else Saliency(func, **self.init_args)
+            )
+
+            inputs = self.get_input_embeds(text)
+
+            attr = dl.attribute(inputs, target=target_pos_idx, **kwargs)
+            attr = attr[0, :input_len, :].detach().cpu()
+
+            # pool over hidden size
+            attr = attr.sum(-1).numpy()
 
         output = Explanation(
             text=text,
@@ -127,6 +158,7 @@ class IntegratedGradientExplainer(BaseExplainer):
         target_pos_idx = self.helper._check_target(target)
         target_token_pos_idx = self.helper._check_target_token(text, target_token)
         text = self.helper._check_sample(text)
+        text = self.helper._prepare_sample(text)
 
         def func(input_embeds):
             attention_mask = torch.ones(
@@ -140,20 +172,48 @@ class IntegratedGradientExplainer(BaseExplainer):
             )
             return logits
 
-        item = self._tokenize(text)
-        input_len = item["attention_mask"].sum().item()
-        dl = IntegratedGradients(
-            func, multiply_by_inputs=self.multiply_by_inputs, **self.init_args
-        )
-        inputs = self.get_input_embeds(text)
-        baselines = self._generate_baselines(input_len)
+        if self.helper.HELPER_TYPE == "multiple-choice":
+            combined_scores = []
+            max_length = 0
 
-        attr = dl.attribute(inputs, baselines=baselines, target=target_pos_idx, **kwargs)
+            # 1) compute attribution scores and find the maximum length
+            for combined_text in text:
+                item = self._tokenize(combined_text)
+                input_len = item["attention_mask"].sum().item()
+                inputs = self.get_input_embeds(combined_text)
+                baselines = self._generate_baselines(input_len)
 
-        attr = attr[0, :input_len, :].detach().cpu()
+                dl = IntegratedGradients(
+                    func, multiply_by_inputs=self.multiply_by_inputs, **self.init_args
+                )
+                attr = dl.attribute(inputs, baselines=baselines, target=target_pos_idx, **kwargs)
+                attr = attr[0, :input_len, :].detach().cpu()
+                attr = attr.sum(-1).numpy()
 
-        # pool over hidden size
-        attr = attr.sum(-1).numpy()
+                combined_scores.append(attr)
+                max_length = max(max_length, len(attr))
+
+            # 2) pad each array to the max length
+            padded_scores = [np.pad(attr, (0, max_length - len(attr)), 'constant') for attr in combined_scores]
+
+            # Compute the mean across the padded scores
+            attr = np.mean(np.array(padded_scores), axis=0)
+        
+        else:
+            item = self._tokenize(text)
+            input_len = item["attention_mask"].sum().item()
+            dl = IntegratedGradients(
+                func, multiply_by_inputs=self.multiply_by_inputs, **self.init_args
+            )
+            inputs = self.get_input_embeds(text)
+            baselines = self._generate_baselines(input_len)
+
+            attr = dl.attribute(inputs, baselines=baselines, target=target_pos_idx, **kwargs)
+
+            attr = attr[0, :input_len, :].detach().cpu()
+
+            # pool over hidden size
+            attr = attr.sum(-1).numpy()
 
         # norm_attr = self._normalize_input_attributions(attr.detach())
         output = Explanation(

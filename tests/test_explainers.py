@@ -32,6 +32,10 @@ class TestExplainers(unittest.TestCase):
         self.model_ner = AutoModelForTokenClassification.from_pretrained("Babelscape/wikineural-multilingual-ner").to("cpu")
         self.tokenizer_ner = AutoTokenizer.from_pretrained("Babelscape/wikineural-multilingual-ner")
 
+        # Multiple-Choice
+        self.model_multiple_choice = AutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased")
+        self.tokenizer_multiple_choice = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+
         # Benchmark instances
         self.bench_text_class = Benchmark(self.model_text_class, self.tokenizer_text_class, task_name="text-classification")
         self.bench_nli = Benchmark(self.model_nli, self.tokenizer_nli, task_name="nli")
@@ -197,3 +201,36 @@ class TestExplainers(unittest.TestCase):
         explanation = exp(text, target="I-LOC", target_token="York")
         self.assertTrue("york" in [token.lower() for token in explanation.tokens])
         self.assertEqual(explanation.target_pos_idx, 6)
+
+
+    def test_shap_multiple_choice(self):
+        question = "Who was the first President of the United States?"
+        choices = ["George Washington", "John Adams", "Thomas Jefferson", "Abraham Lincoln"]
+        exp = SHAPExplainer(self.model_multiple_choice, self.tokenizer_multiple_choice, task_name="multiple-choice")
+        explanation = exp((question, choices), target=0)
+        self.assertIn(question.split()[0].lower(), [token.lower() for token in explanation.tokens])
+        self.assertEqual(explanation.target_pos_idx, 0)
+
+    def test_lime_multiple_choice(self):
+        question = "Who was the first President of the United States?"
+        choices = ["George Washington", "John Adams", "Thomas Jefferson", "Abraham Lincoln"]
+        exp = LIMEExplainer(self.model_multiple_choice, self.tokenizer_multiple_choice, task_name="multiple-choice")
+        explanation = exp((question, choices), target=0)
+        self.assertIn(question.split()[0].lower(), [token.lower() for token in explanation.tokens])
+        self.assertEqual(explanation.target_pos_idx, 0)
+    
+    def test_gradient_multiple_choice(self):
+        question = "Who was the first President of the United States?"
+        choices = ["George Washington", "John Adams", "Thomas Jefferson", "Abraham Lincoln"]
+        exp = GradientExplainer(self.model_multiple_choice, self.tokenizer_multiple_choice, task_name="multiple-choice")
+        explanation = exp((question, choices), target=0)
+        self.assertIn(question.split()[0].lower(), [token.lower() for token in explanation.tokens])
+        self.assertEqual(explanation.target_pos_idx, 0)
+
+    def test_integrated_gradient_multiple_choice(self):
+        question = "Who was the first President of the United States?"
+        choices = ["George Washington", "John Adams", "Thomas Jefferson", "Abraham Lincoln"]
+        exp = IntegratedGradientExplainer(self.model_multiple_choice, self.tokenizer_multiple_choice, task_name="multiple-choice")
+        explanation = exp((question, choices), target=0)
+        self.assertIn(question.split()[0].lower(), [token.lower() for token in explanation.tokens])
+        self.assertEqual(explanation.target_pos_idx, 0)

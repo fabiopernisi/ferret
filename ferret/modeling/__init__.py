@@ -2,6 +2,7 @@ from .text_helpers import (
     SequenceClassificationHelper,
     TokenClassificationHelper,
     ZeroShotTextClassificationHelper,
+    MultipleChoiceHelper
 )
 
 SUPPORTED_TASKS_TO_HELPERS = {
@@ -9,6 +10,7 @@ SUPPORTED_TASKS_TO_HELPERS = {
     "nli": SequenceClassificationHelper,
     "zero-shot-text-classification": ZeroShotTextClassificationHelper,
     "ner": TokenClassificationHelper,
+    "multiple-choice": MultipleChoiceHelper,
 }
 
 

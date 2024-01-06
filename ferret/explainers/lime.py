@@ -29,6 +29,7 @@ class LIMEExplainer(BaseExplainer):
         # sanity checks
         target_pos_idx = self.helper._check_target(target)
         text = self.helper._check_sample(text)
+        text = self.helper._prepare_sample(text)
         target_token_pos_idx = self.helper._check_target_token(text, target_token)
 
         # token_masking_strategy = call_args.pop("token_masking_strategy", "mask")
@@ -108,25 +109,65 @@ class LIMEExplainer(BaseExplainer):
 
         
         lime_args = kwargs.get('call_args', {})
+        if self.helper.HELPER_TYPE == "multiple-choice":
+            individual_explanations = []
+            combined_scores = []
+            max_length = 0
 
-        item = self._tokenize(text, return_special_tokens_mask=True)
-        token_ids = item["input_ids"][0].tolist()
+            # 1) Compute scores and find the maximum length
+            for combined_text in text:
+                item = self._tokenize(combined_text, return_special_tokens_mask=True)
+                token_ids = item["input_ids"][0].tolist()
+                if num_samples is None:
+                    num_samples_choice = min(len(token_ids) ** 2, max_samples)
 
-        if num_samples is None:
-            num_samples = min(len(token_ids) ** 2, max_samples)  # powerset size
-        
-        expl = run_lime_explainer(token_ids, target_pos_idx, num_samples, lime_args)
+                expl = run_lime_explainer(token_ids, target_pos_idx, num_samples_choice, lime_args)
+                choice_scores = np.array([list(dict(sorted(expl.local_exp[target_pos_idx])).values())])
 
-        token_scores = np.array(
-        [list(dict(sorted(expl.local_exp[target_pos_idx])).values())]
-        )
-        token_scores[item["special_tokens_mask"].bool().cpu().numpy()] = 0.0
-        # token_scores is initially created as a 2D array with a single row, where each column 
-        # contains the importance score of each token in the analyzed text. 
-        # By setting token_scores = token_scores[0], we convert it to a 1D array for ease of use, 
-        # as it contains scores for the single text sequence processed by LIME.
-        token_scores = token_scores[0]
+                # Mask special tokens
+                special_tokens_mask = item["special_tokens_mask"][0].bool()
+                choice_scores[:, special_tokens_mask] = 0.0
 
+                # Flatten and append to combined_scores
+                combined_scores.append(choice_scores.flatten())
+                max_length = max(max_length, len(choice_scores.flatten()))
+
+                # Create individual explanation
+                individual_token_scores = np.pad(choice_scores.flatten(), (0, max_length - len(choice_scores.flatten())), 'constant')
+                individual_explanations.append(Explanation(
+                    text=combined_text,
+                    tokens=self.get_tokens(combined_text),
+                    scores=individual_token_scores,
+                    explainer=self.NAME,
+                    helper_type=self.helper.HELPER_TYPE,
+                    target_pos_idx=target_pos_idx,
+                    target_token_pos_idx=target_token_pos_idx,
+                    target=self.helper.model.config.id2label[target_pos_idx],
+                    target_token=None
+                ))
+
+            # 2) Pad each array in combined_scores to the max length
+            padded_scores = [np.pad(attr, (0, max_length - len(attr)), 'constant') for attr in combined_scores]
+            # 3) Compute the mean across the padded scores
+            token_scores = np.mean(np.array(padded_scores), axis=0)
+        else:
+            item = self._tokenize(text, return_special_tokens_mask=True)
+            token_ids = item["input_ids"][0].tolist()
+
+            if num_samples is None:
+                num_samples = min(len(token_ids) ** 2, max_samples)  # powerset size
+            
+            expl = run_lime_explainer(token_ids, target_pos_idx, num_samples, lime_args)
+
+            token_scores = np.array(
+            [list(dict(sorted(expl.local_exp[target_pos_idx])).values())]
+            )
+            token_scores[item["special_tokens_mask"].bool().cpu().numpy()] = 0.0
+            # token_scores is initially created as a 2D array with a single row, where each column 
+            # contains the importance score of each token in the analyzed text. 
+            # By setting token_scores = token_scores[0], we convert it to a 1D array for ease of use, 
+            # as it contains scores for the single text sequence processed by LIME.
+            token_scores = token_scores[0]
         output = Explanation(
             text=text,
             tokens=self.get_tokens(text),

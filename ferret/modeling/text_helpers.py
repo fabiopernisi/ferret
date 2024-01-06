@@ -270,6 +270,10 @@ class ZeroShotTextClassificationHelper(BaseTextTaskHelper):
         target_option = kwargs["target_option"]
         # Simikarly to what done for the NLI task above we combine sample and target option through a separator token token
         sep_token = self.tokenizer.sep_token if hasattr(self.tokenizer, 'sep_token') else "[SEP]"
+        # if _prepare_sample has already been called on sample, don't call it again
+        if isinstance(sample, list) and isinstance(sample[0], str):
+            if sep_token in sample[0]:
+                return sample
         if sep_token == "[SEP]":
             logging.warning("Using hardcoded '[SEP]' as separator token.")
         return [sample + f" {sep_token} " + self.DEFAULT_TEMPLATE.format(target_option)]
@@ -372,3 +376,35 @@ class TokenClassificationHelper(BaseTextTaskHelper):
     def _postprocess_logits(self, logits, **kwargs):
         target_token_pos_idx = kwargs["target_token_pos_idx"]
         return logits[:, target_token_pos_idx, :]
+
+class MultipleChoiceHelper(BaseTextTaskHelper):
+    HELPER_TYPE = "multiple-choice"
+
+    def __init__(self, model, tokenizer):
+        super().__init__(model, tokenizer)
+
+    def _prepare_sample(self, sample, **kwargs):
+        sep_token = self.tokenizer.sep_token if hasattr(self.tokenizer, 'sep_token') else "[SEP]"
+        # if _prepare_sample has already been called on sample, don't call it again
+        if isinstance(sample, list) and isinstance(sample[0], str):
+            if sep_token in sample[0]:
+                return sample
+        if sep_token == "[SEP]":
+            logging.warning("Using hardcoded '[SEP]' as separator token.")
+        question, choices = sample
+        formatted_texts = [f"{question} {sep_token} {choice}" for choice in choices]
+        return formatted_texts
+
+    def _score(
+        self,
+        sample,
+        return_probs: bool = False,
+    ):
+        #very similar to zero-shot classification
+        formatted_texts = self._prepare_sample(sample)
+        _, logits = self._forward(formatted_texts, output_hidden_states=False)
+        scores = logits.softmax(-1)
+
+        if return_probs:
+            scores = scores.softmax(-1)
+        return scores

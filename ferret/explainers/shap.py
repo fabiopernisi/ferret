@@ -41,6 +41,7 @@ class SHAPExplainer(BaseExplainer):
         target_pos_idx = self.helper._check_target(target)
         target_token_pos_idx = self.helper._check_target_token(text, target_token)
         text = self.helper._check_sample(text)
+        text = self.helper._prepare_sample(text)
 
         # Removing 'target_option' if passed as it's not relevant here
         if 'target_option' in kwargs:
